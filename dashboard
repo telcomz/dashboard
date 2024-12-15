@@ -1,0 +1,123 @@
+// Configuraremos un backend con Node.js + Express.js y un frontend con React.js.
+// Este ejemplo asume que tienes Node.js y npm instalados.
+
+// *** Backend: API con Node.js ***
+// Archivo: server.js
+
+const express = require('express');
+const mysql = require('mysql2');
+const jwt = require('jsonwebtoken');
+const cors = require('cors');
+const app = express();
+const PORT = 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Configuración de la base de datos
+const db = mysql.createPool({
+  host: '54.175.177.20', // Cambia según tu configuración
+  user: 'root',
+  password: 'emqxpass',
+  database: 'emqx',
+});
+
+// Ruta: Inicio de sesión
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  const sql = 'SELECT * FROM users WHERE username = ? AND password = ?';
+  db.query(sql, [username, password], (err, result) => {
+    if (err) return res.status(500).send(err);
+    if (result.length > 0) {
+      const token = jwt.sign({ id: result[0].id }, 'secreto', { expiresIn: '1h' });
+      res.json({ token });
+    } else {
+      res.status(401).json({ message: 'Credenciales inválidas' });
+    }
+  });
+});
+
+// Ruta: Obtener datos del dashboard
+app.get('/dashboard', (req, res) => {
+  const token = req.headers.authorization;
+  if (!token) return res.status(401).send('Acceso denegado');
+
+  jwt.verify(token, 'secreto', (err, decoded) => {
+    if (err) return res.status(403).send('Token inválido');
+
+    const sql = 'SELECT * FROM dashboard_data WHERE user_id = ?';
+    db.query(sql, [decoded.id], (err, result) => {
+      if (err) return res.status(500).send(err);
+      res.json(result);
+    });
+  });
+});
+
+app.listen(PORT, () => console.log(`Servidor corriendo en http://localhost:${PORT}`));
+
+// *** Frontend: React.js ***
+// Archivo: App.js
+
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const App = () => {
+  const [token, setToken] = useState(null);
+  const [dashboardData, setDashboardData] = useState([]);
+  const [loginInfo, setLoginInfo] = useState({ username: '', password: '' });
+
+  const handleLogin = async () => {
+    try {
+      const res = await axios.post('http://localhost:3001/login', loginInfo);
+      setToken(res.data.token);
+    } catch (err) {
+      console.error('Error al iniciar sesión:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (token) {
+      axios
+        .get('http://localhost:3001/dashboard', {
+          headers: { Authorization: token },
+        })
+        .then((res) => setDashboardData(res.data))
+        .catch((err) => console.error('Error al obtener datos:', err));
+    }
+  }, [token]);
+
+  return (
+    <div>
+      {!token ? (
+        <div>
+          <h2>Inicio de Sesión</h2>
+          <input
+            type="text"
+            placeholder="Usuario"
+            value={loginInfo.username}
+            onChange={(e) => setLoginInfo({ ...loginInfo, username: e.target.value })}
+          />
+          <input
+            type="password"
+            placeholder="Contraseña"
+            value={loginInfo.password}
+            onChange={(e) => setLoginInfo({ ...loginInfo, password: e.target.value })}
+          />
+          <button onClick={handleLogin}>Ingresar</button>
+        </div>
+      ) : (
+        <div>
+          <h2>Dashboard</h2>
+          <ul>
+            {dashboardData.map((item) => (
+              <li key={item.id}>{item.data}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
